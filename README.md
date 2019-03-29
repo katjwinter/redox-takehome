@@ -10,7 +10,7 @@ Once Node.js and npm are installed, do an `npm install` from the top level
 directory to get required dependencies.
 
 ## Running:
-To run the app, do `npm start` or `node index.js` from the top level directory.
+To run the app, do `npm start` or `node index.js run` from the top level directory.
 
 ## Testing:
 To run tests, do `npm test` from the top level directory.

@@ -5,11 +5,14 @@
   "main": "index.js",
   "scripts": {
     "test": "jasmine-node spec",
-    "start": "node index.js"
+    "start": "node index.js run"
   },
   "author": "Kat Winter",
   "license": "ISC",
   "dependencies": {
-    "jasmine-node": "^1.16.2"
+    "jasmine-node": "^1.16.2",
+    "nock": "^10.0.6",
+    "request": "^2.88.0",
+    "request-promise-native": "^1.0.7"
   }
 }
