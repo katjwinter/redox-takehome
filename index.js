@@ -1,20 +1,47 @@
 const request = require('request');
 const rp = require('request-promise-native');
 
-const baseURI = 'https://api.github.com';
-const headers = {
+const org = 'ramda';
+const username = '';
+const token = '';
+let headers = {
   'Accept': 'application/vnd.github.v3+json',
   'User-Agent': 'redox-takehome',
 };
+const baseURI = 'https://api.github.com';
+const paginationRegex = /(?<=\<).+?(?=\>;\srel="next")/
 
-// Request all repos for an org and filter for pertinent information
+// Check if authorization information has been provided, and if so, return
+// a Basic Auth header.
+const getAuth = () => {
+  if (username && token) {
+    const converted = Buffer.from(`${username}:${token}`).toString('base64');
+    return `Basic ${converted}`;
+  } else {
+    console.log(`No auth provided, which will limit hourly rate limits`);
+    return null;
+  }
+}
+
+// Request all repos for an org
 const getRepos = (org) => {
   const opts = {
     url: `${baseURI}/orgs/${org}/repos`,
     headers,
     resolveWithFullResponse: true,
   }
+  return paginateRepos(opts, [])
+  .then(results => {
+    return results;
+  })
+  .catch(err => {
+    console.log(`err: ${err}`);
+    return err.statusCode;
+  });
+}
 
+// Make API call for repos, and paginate if necessary.
+const paginateRepos = (opts, results) => {
   return rp(opts).then(res => {
     const data = JSON.parse(res.body);
     const repos = data.map(repo => {
@@ -23,12 +50,42 @@ const getRepos = (org) => {
         fullName: repo.full_name,
       };
     });
-    return repos;
-  }).catch(err => {
-    // Request-Promise will reject any non-2xx status codes, so we can assume
-    // a succesfull request above, and then handle any  non-2xx status codes here.
-    return err.statusCode;
+    results = results.concat(repos);
+
+    if (res.headers.link && paginationRegex.test(res.headers.link)) {
+      opts.url = paginationRegex.exec(res.headers.link)[0];
+      return paginateRepos(opts, results);
+    } else {
+      return results;
+    }
   });
+}
+
+// Make API calls for pull requests, and paginate if necessary.
+const paginatePullRequests = (requests, results) => {
+  if (requests.length) {
+    return Promise.all(requests)
+    .then(responses => {
+      paginationRequests = [];
+
+      responses.forEach(res => {
+        results.push(JSON.parse(res.body));
+
+        if (res.headers.link && paginationRegex.test(res.headers.link)) {
+          const opts = {
+            url: paginationRegex.exec(res.headers.link)[0],
+            headers,
+            resolveWithFullResponse: true,
+          };
+          paginationRequests.push( rp(opts) );
+        }
+      });
+      return paginatePullRequests(paginationRequests, results);
+    });
+  } else {
+    // If there are no further requests to paginate, just return results
+    return results;
+  }
 }
 
 // Request pull requests for each repo and return them as a single array of PRs
@@ -43,21 +100,19 @@ const getAllPullRequests = (repos) => {
     return rp(opts);
   });
 
-  // Make requests for PRs for each repo, extract body from the response,
-  // and use 'reduce' to flatten to a single array of PRs
-  return Promise.all(arrayOfRequests).then(responses => {
-    return responses.map(response => {
-      const data = JSON.parse(response.body);
-      return data;
-    }).reduce( (a,b) => a.concat(b), []);
-  }).catch(err => {
+  return paginatePullRequests(arrayOfRequests, [])
+  .then(results => {
+    // flatten to a single array of pull requests
+    return results.reduce( (a,b) => a.concat(b), []);
+  })
+  .catch(err => {
+    console.log(`err: ${err}`);
     return err.statusCode;
   });
 }
 
 // Parse PRs for the pertinent information we might want
 const parsePullRequests = (pullRequests) => {
-  console.log(`PR Count: ${pullRequests.length}`);
   return pullRequests.map(pr => {
     return {
       title: pr.title,
@@ -73,12 +128,18 @@ const parsePullRequests = (pullRequests) => {
 
 // Main control
 const run = () => {
-  getRepos('ramda')
+  const auth = getAuth();
+  if (auth) {
+    headers.Authorization = auth;
+  }
+
+  getRepos(org)
   .then(repos => {
     return getAllPullRequests(repos);
   }).then(pullRequests => {
     return parsePullRequests(pullRequests);
   }).then(results => {
+    console.log(`PR Count: ${results.length}`);
     // do stuff with results
   });
 }

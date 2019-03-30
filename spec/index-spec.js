@@ -6,6 +6,14 @@ let expectedRepoResponse = [{
   fullName: 'testName/testName',
 }];
 
+let expectedPaginatedRepoResponse = [{
+  name: 'testName',
+  fullName: 'testName/testName',
+}, {
+  name: 'test2Name',
+  fullName: 'test2Name/test2Name',
+}];
+
 let expectedPRResponse = [{
     title: 'testTitle',
     number: '1',
@@ -33,6 +41,26 @@ let expectedPRResponse = [{
     closed_at: '2019-03-28T09:00:00Z',
     merged_at: '2019-03-28T09:00:00Z',
     foo: 'anotherFoo',
+}];
+
+let expectedPaginatedPRResponse = [{
+  title: 'a PR',
+  number: '1',
+  state: 'open',
+  created_at: '2019-03-29T09:00:00Z',
+  updated_at: '2019-03-29T09:00:00Z',
+  closed_at: '2019-03-29T09:00:00Z',
+  merged_at: '2019-03-29T09:00:00Z',
+  foo: 'bar',
+}, {
+  title: 'another PR',
+  number: '2',
+  state: 'open',
+  created_at: '2019-03-29T09:00:00Z',
+  updated_at: '2019-03-29T09:00:00Z',
+  closed_at: '2019-03-29T09:00:00Z',
+  merged_at: '2019-03-29T09:00:00Z',
+  foo: 'baz',
 }];
 
 let expectedParsedResponse = [{
@@ -75,11 +103,37 @@ describe('getRepos', () => {
     const orgReject = nock('https://api.github.com/orgs/fail')
     .get('/repos')
     .reply(404, {});
+
+    const pag1 = nock('https://api.github.com/orgs/manyRepos')
+    .get('/repos')
+    .reply(200, [{
+      name: 'testName',
+      full_name: 'testName/testName',
+      foo: 'bar'
+    }], {
+      link: '<https://api.github.com/orgs/manyRepos/repos?page=2>; rel="next", <https://api.github.com/repositories/10851820/pulls?state=all&page=50>; rel="last"'
+    });
+
+    const pag2 = nock('https://api.github.com/orgs/manyRepos')
+    .get('/repos?page=2')
+    .reply(200, [{
+        name: 'test2Name',
+        full_name: 'test2Name/test2Name',
+        foo: 'bar',
+      }]
+    );
   });
 
   it('should reject on non-2xx status', (done) => {
     getRepos('fail').then(res => {
       expect(res).toBe(404);
+      done();
+    });
+  });
+
+  it('should paginate correctly', (done) => {
+    getRepos('manyRepos').then(res => {
+      expect(res).toEqual(expectedPaginatedRepoResponse);
       done();
     });
   });
@@ -138,6 +192,34 @@ describe('getAllPullRequests', () => {
       }]
     );
 
+    const pagRepo = nock('https://api.github.com/repos/manyPR/one')
+    .get('/pulls?state=all')
+    .reply(200, [{
+      title: 'a PR',
+      number: '1',
+      state: 'open',
+      created_at: '2019-03-29T09:00:00Z',
+      updated_at: '2019-03-29T09:00:00Z',
+      closed_at: '2019-03-29T09:00:00Z',
+      merged_at: '2019-03-29T09:00:00Z',
+      foo: 'bar',
+    }], {
+      link: '<https://api.github.com/repos/manyPR/one/pulls?state=all&page=2>; rel="next", <https://api.github.com/repos/manyPR/one/pulls?state=all&page=20>; rel="last"'
+    });
+
+    const pagRepo2 = nock('https://api.github.com/repos/manyPR/one')
+    .get('/pulls?state=all&page=2')
+    .reply(200, [{
+      title: 'another PR',
+      number: '2',
+      state: 'open',
+      created_at: '2019-03-29T09:00:00Z',
+      updated_at: '2019-03-29T09:00:00Z',
+      closed_at: '2019-03-29T09:00:00Z',
+      merged_at: '2019-03-29T09:00:00Z',
+      foo: 'baz',
+    }]);
+
     const repoReject = nock('https://api.github.com/repos/fail/fail')
     .get('/pulls?state=all')
     .reply(404, {});
@@ -148,6 +230,13 @@ describe('getAllPullRequests', () => {
       expect(res).toBe(404);
       done();
     })
+  });
+
+  it('should paginate correctly', (done) => {
+    getAllPullRequests([{ fullName: 'manyPR/one' }]).then(res => {
+      expect(res).toEqual(expectedPaginatedPRResponse);
+      done();
+    });
   });
 
   it('should return a properly flattened array of PRs', (done) => {
