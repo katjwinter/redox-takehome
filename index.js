@@ -7,6 +7,7 @@ const headers = {
   'User-Agent': 'redox-takehome',
 };
 
+// Request all repos for an org and filter for pertinent information
 const getRepos = (org) => {
   const opts = {
     url: `${baseURI}/orgs/${org}/repos`,
@@ -20,8 +21,6 @@ const getRepos = (org) => {
       return {
         name: repo.name,
         fullName: repo.full_name,
-        createdAt: repo.created_at,
-        updatedAt: repo.updated_at,
       };
     });
     return repos;
@@ -32,8 +31,9 @@ const getRepos = (org) => {
   });
 }
 
+// Request pull requests for each repo and return them as a single array of PRs
 const getAllPullRequests = (repos) => {
-  // create an array of requests from the array of repos
+  // Create an array of requests from the array of repos
   let arrayOfRequests = repos.map(repo => {
     const opts = {
       url: `${baseURI}/repos/${repo.fullName}/pulls?state=all`,
@@ -43,41 +43,47 @@ const getAllPullRequests = (repos) => {
     return rp(opts);
   });
 
-  // Make all of the requests, and then process all of the responses:
-  // 1. Parse each response body
-  // 2. Use mapping to extract only the information we need
-  // 3. Use reduce to flatten the resulting array of arrays
+  // Make requests for PRs for each repo, extract body from the response,
+  // and use 'reduce' to flatten to a single array of PRs
   return Promise.all(arrayOfRequests).then(responses => {
-    responses = responses.map(response => {
+    return responses.map(response => {
       const data = JSON.parse(response.body);
-      pulls = data.map(pull => {
-        return {
-          title: pull.title,
-        }
-      });
-      return pulls;
-    }).reduce( (a,b) => a.concat(b), [] );
-    return responses;
+      return data;
+    }).reduce( (a,b) => a.concat(b), []);
   }).catch(err => {
     return err.statusCode;
   });
 }
 
-const parsePullRequests = (res) => {
-
+// Parse PRs for the pertinent information we might want
+const parsePullRequests = (pullRequests) => {
+  console.log(`PR Count: ${pullRequests.length}`);
+  return pullRequests.map(pr => {
+    return {
+      title: pr.title,
+      number: pr.number,
+      state: pr.state,
+      createdAt: pr.created_at,
+      updatedAt: pr.updated_at,
+      closedAt: pr.closed_at,
+      mergedAt: pr.merged_at,
+    };
+  });
 }
 
+// Main control
 const run = () => {
   getRepos('ramda')
   .then(repos => {
     return getAllPullRequests(repos);
   }).then(pullRequests => {
-    console.log(`stuff: ${JSON.stringify(pullRequests)}`);
+    return parsePullRequests(pullRequests);
+  }).then(results => {
+    // do stuff with results
   });
-
 }
 
-// Don't actually run when we're just testing
+// Ensure we only call run when we want to and not during testing
 for (var i = 0; i < process.argv.length; i++) {
   switch (process.argv[i]) {
     case 'run':
@@ -89,4 +95,4 @@ for (var i = 0; i < process.argv.length; i++) {
   }
 }
 
-module.exports = { getAllPullRequests, getRepos }
+module.exports = { getAllPullRequests, getRepos, parsePullRequests }
