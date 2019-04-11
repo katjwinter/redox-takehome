@@ -11,6 +11,7 @@
   "license": "ISC",
   "dependencies": {
     "jasmine-node": "^1.16.2",
+    "moment": "^2.24.0",
     "nock": "^10.0.6",
     "request": "^2.88.0",
     "request-promise-native": "^1.0.7"

@@ -1,5 +1,6 @@
 const request = require('request');
 const rp = require('request-promise-native');
+const moment = require('moment');
 
 const org = 'ramda';
 const username = '';
@@ -122,8 +123,197 @@ const parsePullRequests = (pullRequests) => {
       updatedAt: pr.updated_at,
       closedAt: pr.closed_at,
       mergedAt: pr.merged_at,
+      repo: pr.repo.full_name,
     };
   });
+}
+
+// Week over week average size based on number of files
+const avgByFileCount = (pullRequests) => {
+  const result = {};
+  let arrayOfFileRequests = [];
+
+  pullRequests.forEach(pr => {
+    arrayOfFileRequests.push(getFileCount(pr));
+  });
+
+  return Promise.all(arrayOfFileRequests).then(results => {
+    const weeklyPRs = prsByWeek(results);
+    Object.keys(weeklyPRs).forEach(week => {
+      const sum = weeklyPRs[week].reduce((acc, pr) => {
+        return acc + pr.fileCount;
+      }, 0);
+      result[week] = sum / weeklyPRs[week].length;
+    })
+    return result;
+  });
+}
+
+const getFileCount = (pr) => {
+  return getFiles(pr).then(files => {
+    pr.fileCount = files.length;
+    return pr;
+  })
+}
+
+const getFiles = (pr) => {
+  const opts = {
+    url: `${baseURI}/repos/${pr.repo}/pulls/${pr.number}/files`,
+    headers,
+    resolveWithFullResponse: true,
+  }
+  return paginateFiles(opts, [])
+  .then(results => {
+    return results;
+  });
+}
+
+const paginateFiles = (opts, results) => {
+  return rp(opts).then(res => {
+    let data = JSON.parse(res.body);
+    results = results.concat(data);
+
+    if (res.headers.link && paginationRegex.test(res.headers.link)) {
+      opts.url = paginationRegex.exec(res.headers.link)[0];
+      return paginateFiles(opts, results);
+    } else {
+      return results;
+    }
+  });
+}
+
+// Week over week average time from first commit to merge
+const avgFromCommit = (pullRequests) => {
+  const result = {};
+  let arrayOfCommitRequests = [];
+
+  pullRequests.forEach(pr => {
+    arrayOfCommitRequests.push(getFirstCommit(pr));
+  });
+
+  return Promise.all(arrayOfCommitRequests).then(results => {
+    const weeklyPRs = prsByWeek(results);
+    Object.keys(weeklyPRs).forEach(week => {
+      const sum = weeklyPRs[week].reduce((acc, pr) => {
+        return acc + moment(pr.mergedAt).diff(pr.firstCommit, 'days');
+      }, 0);
+      result[week] = sum / weeklyPRs[week].length;
+    })
+    return result;
+  });
+}
+
+const getFirstCommit = (pr) => {
+  return getCommits(pr).then(commits => {
+    pr.firstCommit = commits[0].committer.date;
+    return pr;
+  });
+}
+
+const getCommitsForPR = (pr) => {
+  return getCommits(pr).then(commits => {
+    pr.commits = commits;
+    return pr;
+  });
+}
+
+// Week over week size based on average number of commits
+const avgCommitCount = (pullRequests) => {
+  const result = {};
+  let arrayOfCommitRequests = [];
+
+  pullRequests.forEach(pr => {
+    arrayOfCommitRequests.push(getCommitsForPR(pr));
+  });
+
+  return Promise.all(arrayOfCommitRequests).then(results => {
+    const weeklyPRs = prsByWeek(results);
+    Object.keys(weeklyPRs).forEach(week => {
+      const sum = weeklyPRs[week].reduce((acc, pr) => {
+        return acc + pr.commits.length;
+      }, 0)
+      result[week] = sum / weeklyPRs[week].length;
+    })
+    return result;
+  })
+}
+
+// Commits for a given PR
+const getCommits = (pr) => {
+  const opts = {
+    url: `${baseURI}/repos/${pr.repo}/pulls/${pr.number}/commits`,
+    headers,
+    resolveWithFullResponse: true,
+  }
+  return paginateCommits(opts, [])
+  .then(results => {
+    results = results.sort((commit1, commit2) => {
+      const date1 = moment(commit1.committer.date);
+      const date2 = moment(commit2.committer.date);
+      return date1.diff(date2, 'days');
+    });
+    return results;
+  });
+}
+
+const paginateCommits = (opts, results) => {
+  return rp(opts).then(res => {
+    let data = JSON.parse(res.body);
+    results = results.concat(data);
+
+    if (res.headers.link && paginationRegex.test(res.headers.link)) {
+      opts.url = paginationRegex.exec(res.headers.link)[0];
+      return paginateCommits(opts, results);
+    } else {
+      return results;
+    }
+  });
+}
+
+// PRs sorted by merge date
+const prsByWeek = (pullRequests) => {
+  const results = {};
+  pullRequests = pullRequests.filter(pr => {
+    return pr.mergedAt;
+  });
+
+  pullRequests.forEach(pr => {
+    const week = moment(pr.mergedAt).startOf('week').format('YYYY-MM-DD');
+    if (results[week]) {
+      results[week].push(pr);
+    } else {
+      results[week] = [pr];
+    }
+  });
+
+  return results;
+}
+
+// Week over week PR counts
+const prCountsByWeek = (pullRequests) => {
+  let strResult = '';
+  const weeklyPRs = prsByWeek(pullRequests);
+  Object.keys(weeklyPRs).forEach(week => {
+    strResult = strResult ? strResult + ', ' : strResult;
+    strResult = strResult + `${week}: ${weeklyPRs[week].length}`;
+  });
+
+  return strResult;
+}
+
+// Week over week average of time from creation to merge
+const avgTimeToMerge = (pullRequests) => {
+  const result = {};
+  const weeklyPRs = prsByWeek(pullRequests);
+
+  Object.keys(weeklyPRs).forEach(week => {
+    const sum = weeklyPRs[week].reduce((acc, pr) => {
+      return acc + moment(pr.mergedAt).diff(pr.createdAt, 'days');
+    }, 0)
+    result[week] = sum / weeklyPRs[week].length;
+  });
+
+  return result;
 }
 
 // Main control
@@ -156,4 +346,4 @@ for (var i = 0; i < process.argv.length; i++) {
   }
 }
 
-module.exports = { getAllPullRequests, getRepos, parsePullRequests }
+module.exports = { avgByFileCount, avgCommitCount, avgFromCommit, avgTimeToMerge, getAllPullRequests, getFirstCommit, getRepos, parsePullRequests, prsByWeek, prCountsByWeek }
